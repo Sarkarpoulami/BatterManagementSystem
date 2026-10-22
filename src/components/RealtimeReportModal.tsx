@@ -29,6 +29,8 @@ interface RealtimeReportModalProps {
   isRunning: boolean;
   /** Builds a report from the live pack state at the instant it is called. */
   generate: () => StoredReport;
+  /** When set, shows this exact stored report frozen (run-history view) instead of the live pack. */
+  stored?: StoredReport | null;
 }
 
 function Kpi({ label, value, unit, sub, accent, icon }: {
@@ -82,22 +84,24 @@ function ExportTile({
   );
 }
 
-export function RealtimeReportModal({ isOpen, onClose, isRunning, generate }: RealtimeReportModalProps) {
+export function RealtimeReportModal({ isOpen, onClose, isRunning, generate, stored = null }: RealtimeReportModalProps) {
   const [cellId, setCellId] = useState<number>(1);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<StoredReport | null>(null);
+  const fixed = stored !== null;
 
   // Generate the moment the view opens, and keep it current while the sim runs.
+  // In history mode the stored report is shown frozen — no regeneration.
   useEffect(() => {
     if (!isOpen) {
       setReport(null);
       return;
     }
-    setReport(generate());
-    if (!isRunning) return;
+    setReport(fixed ? stored : generate());
+    if (fixed || !isRunning) return;
     const id = setInterval(() => setReport(generate()), 1000);
     return () => clearInterval(id);
-  }, [isOpen, isRunning, generate]);
+  }, [isOpen, isRunning, generate, fixed, stored]);
 
   const derived = useMemo(() => {
     if (!report) return null;
@@ -110,6 +114,12 @@ export function RealtimeReportModal({ isOpen, onClose, isRunning, generate }: Re
   const run = (fn: (snap: StoredReport) => unknown) => {
     setError(null);
     try {
+      if (fixed) {
+        // History snapshot: export exactly the stored report
+        if (report) fn(report);
+        playCellClickSound(820);
+        return;
+      }
       // Regenerate so the downloaded file matches this exact moment
       const fresh = generate();
       setReport(fresh);
@@ -134,11 +144,15 @@ export function RealtimeReportModal({ isOpen, onClose, isRunning, generate }: Re
             </div>
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
-                Live report
+                {fixed ? 'Run report (history)' : 'Live report'}
                 <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                  isRunning ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'bg-slate-800 text-slate-300 border-slate-700'
+                  fixed
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                    : isRunning
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
                 }`}>
-                  <Lock className="w-3 h-3" /> {isRunning ? 'auto-refreshing' : 'generated now'}
+                  <Lock className="w-3 h-3" /> {fixed ? 'history snapshot' : isRunning ? 'auto-refreshing' : 'generated now'}
                 </span>
               </h2>
               <p className="text-[11px] text-slate-400 font-mono">
@@ -163,14 +177,18 @@ export function RealtimeReportModal({ isOpen, onClose, isRunning, generate }: Re
           {report && (
             <>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setReport(generate())}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 cursor-pointer"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" /> Regenerate now
-                </button>
+                {!fixed && (
+                  <button
+                    onClick={() => setReport(generate())}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Regenerate now
+                  </button>
+                )}
                 <span className="text-[11px] text-slate-500">
-                  Nothing here is pre-recorded — the figures are read from the pack the moment you open, refresh or download.
+                  {fixed
+                    ? 'This is the exact report captured when the run ended — downloads reproduce this snapshot.'
+                    : 'Nothing here is pre-recorded — the figures are read from the pack the moment you open, refresh or download.'}
                 </span>
               </div>
 

@@ -21,7 +21,7 @@ import { BmsLogsModal, BmsLogEvent } from './components/BmsLogsModal';
 import { ElectricalOverview } from './components/dashboard/ElectricalOverview';
 import { computeElectrical, accumulateEnergy, EMPTY_ENERGY, type EnergyCounters } from './utils/electrical';
 import { PackWaveforms } from './components/PackWaveforms';
-import { downloadCellPdf, createStoredReport, downloadStoredReportPdf, type ReportContext } from './utils/reportGenerator';
+import { downloadCellPdf, createStoredReport, downloadStoredReportPdf, type ReportContext, type StoredReport } from './utils/reportGenerator';
 import { downloadPackCsv, downloadCellCsv } from './utils/csvExport';
 import { evaluateAlarms, buildScheduledWarning, makeAlarmRecord, currentLimitA, type Alarm, type AlarmRecord, type AlarmSolution } from './utils/alarmSystem';
 import { AlarmOverlay } from './components/AlarmOverlay';
@@ -30,6 +30,16 @@ import { BatterySetupWizard } from './components/BatterySetupWizard';
 import { loadState, saveState, clearState } from './utils/persistence';
 import { KpiStrip } from './components/dashboard/KpiStrip';
 import { DashboardSidebar, type DashTab } from './components/dashboard/DashboardSidebar';
+import { HistoryPanel } from './components/history/HistoryPanel';
+import { CompareLab } from './components/compare/CompareLab';
+import {
+  loadHistory,
+  saveHistory,
+  appendHistoryEntry,
+  buildHistoryEntry,
+  clearHistoryStorage,
+  type HistoryEntry,
+} from './utils/historyStore';
 import { PanelLeft, X, Eye, FileSpreadsheet, FileText, HardDriveDownload, Trash2 } from 'lucide-react';
 
 export default function App() {
@@ -164,6 +174,11 @@ export default function App() {
         : 'e-BMS initialized · 8S string · contactors open · IMD armed.',
     }
   ]);
+
+  // ── Run history: durable record of every simulation report ──
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
+  const [viewStored, setViewStored] = useState<StoredReport | null>(null);
+  const runStartSocRef = useRef<number | null>(null);
 
   // Append Log Helper
   const addLog = useCallback((type: BmsLogEvent['type'], message: string, cellId?: number, voltage?: number) => {
@@ -420,6 +435,8 @@ export default function App() {
   profileRef.current = loadProfile;
   const isRunningRef = useRef(isRunning);
   isRunningRef.current = isRunning;
+  const runStartElapsedRef = useRef(runStartElapsed);
+  runStartElapsedRef.current = runStartElapsed;
 
   // Simulation Tick Interval — only while RUN is engaged
   useEffect(() => {
@@ -995,7 +1012,10 @@ export default function App() {
   const handleAutoBalance = useCallback(() => {
     setIsAutoBalancing(true);
     setSimulationMode('balancing_active');
-    if (!isRunningRef.current) setRunStartElapsed(elapsedRef.current);
+    if (!isRunningRef.current) {
+      setRunStartElapsed(elapsedRef.current);
+      runStartSocRef.current = telemetryRef.current.packSoC;
+    }
     setIsRunning(true);
     setSessionStartedAt((prev) => prev ?? Date.now());
     addLog('balance', `Initiated automated pack equalization cycle. Active balancing shunts engaged.`);
@@ -1032,6 +1052,7 @@ export default function App() {
 
   const handleRun = useCallback(() => {
     setRunStartElapsed(elapsedRef.current);
+    runStartSocRef.current = telemetryRef.current.packSoC;
     setIsRunning(true);
     setSessionStartedAt((prev) => prev ?? Date.now());
     if (modeRef.current === 'idle') {
@@ -1039,7 +1060,7 @@ export default function App() {
       setSimulationMode('discharging_load');
       addLog('info', `RUN from idle: applying ${configRef.current.loadCurrent.toFixed(1)} A discharge load (${profileRef.current.replace(/_/g, ' ')}).`);
     } else {
-      addLog('info', `Simulation RUN — mode ${modeRef.current.replace(/_/g, ' ')}.`);
+      addLog('info', `Simulation RUN — mode ${modeRef.current.replace(/_/g, ' ')}. A report will be recorded in history when you press STOP.`);
     }
   }, [addLog]);
 
@@ -1052,7 +1073,10 @@ export default function App() {
       setIsAutoBalancing(false);
     }
     if (mode !== 'idle') {
-      if (!isRunningRef.current) setRunStartElapsed(elapsedRef.current);
+      if (!isRunningRef.current) {
+        setRunStartElapsed(elapsedRef.current);
+        runStartSocRef.current = telemetryRef.current.packSoC;
+      }
       setIsRunning(true);
       setSessionStartedAt((prev) => prev ?? Date.now());
     }
@@ -1102,11 +1126,61 @@ export default function App() {
   const reportCtxRef = useRef<ReportContext>(reportCtx);
   reportCtxRef.current = reportCtx;
 
+  // ── Run history capture ──
+  // Snapshots the CURRENT pack state as a full stored report and archives it
+  // (offline, survives reloads). Fires automatically when a run is stopped and
+  // can be triggered manually from the History tab.
+  const captureToHistory = useCallback(
+    (trigger: 'run-end' | 'manual') => {
+      try {
+        const rep = createStoredReport(reportCtxRef.current);
+        const runMs = Math.max(0, elapsedRef.current - runStartElapsedRef.current);
+        const entry = buildHistoryEntry(
+          rep,
+          trigger,
+          runMs,
+          trigger === 'run-end' ? runStartSocRef.current : null,
+          historyRef.current.length
+        );
+        setHistory((prev) => {
+          const next = appendHistoryEntry(entry, prev);
+          saveHistory(next);
+          return next;
+        });
+        addLog('info', `REPORT RECORDED — ${rep.label} (${rep.id}) added to run history.`);
+      } catch {
+        addLog('warning', 'REPORT RECORD FAILED — could not snapshot the current pack state for history.');
+      }
+    },
+    [addLog]
+  );
+
+  const handleViewHistoryEntry = useCallback((entry: HistoryEntry) => {
+    playCellClickSound(760);
+    setViewStored(entry.report);
+    setIsRealtimeReportOpen(true);
+  }, []);
+
+  const handleDeleteHistoryEntry = useCallback((id: string) => {
+    setHistory((prev) => {
+      const next = prev.filter((e) => e.id !== id);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
+  const handleClearHistory = useCallback(() => {
+    clearHistoryStorage();
+    setHistory([]);
+    addLog('info', 'Run history cleared — all recorded reports removed from offline storage.');
+  }, [addLog]);
+
   const handleStop = useCallback(() => {
+    captureToHistory('run-end');
     setIsRunning(false);
     addLog('info', 'Simulation stopped. Report view generates from the state at the moment you open it.');
     setIsRealtimeReportOpen(true);
-  }, [addLog]);
+  }, [addLog, captureToHistory]);
 
 
   // Build a report from the CURRENT state at the exact moment it is requested.
@@ -1114,6 +1188,7 @@ export default function App() {
 
   const handleViewReport = useCallback(() => {
     playCellClickSound(760);
+    setViewStored(null);
     setIsRealtimeReportOpen(true);
   }, []);
 
@@ -1385,6 +1460,28 @@ export default function App() {
                 onOpenReports={handleViewReport}
               />
             )}
+
+            {dashTab === 'history' && (
+              <HistoryPanel
+                entries={history}
+                isRunning={isRunning}
+                onView={handleViewHistoryEntry}
+                onPdf={(e) => downloadStoredReportPdf(e.report)}
+                onCsv={(e) => downloadPackCsv(e.report.ctx)}
+                onDelete={handleDeleteHistoryEntry}
+                onClear={handleClearHistory}
+                onCapture={() => captureToHistory('manual')}
+              />
+            )}
+
+            {dashTab === 'compare' && (
+              <CompareLab
+                defaultChemistryA={chemistry}
+                defaultChemistryB={chemistry === 'lifepo4' ? 'li-ion' : 'lifepo4'}
+                defaultSeries={seriesCount}
+                defaultParallel={parallelCount}
+              />
+            )}
           </main>
         </div>
       </div>
@@ -1416,9 +1513,13 @@ export default function App() {
 
       <RealtimeReportModal
         isOpen={isRealtimeReportOpen}
-        onClose={() => setIsRealtimeReportOpen(false)}
+        onClose={() => {
+          setIsRealtimeReportOpen(false);
+          setViewStored(null);
+        }}
         isRunning={isRunning}
         generate={generateReport}
+        stored={viewStored}
       />
 
       <BatterySetupWizard

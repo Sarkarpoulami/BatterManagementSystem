@@ -30,6 +30,8 @@ import { BatterySetupWizard } from './components/BatterySetupWizard';
 import { loadState, saveState, clearState } from './utils/persistence';
 import { KpiStrip } from './components/dashboard/KpiStrip';
 import { DashboardSidebar, type DashTab } from './components/dashboard/DashboardSidebar';
+import { HistoryPanel, type HistoryReport } from './components/dashboard/HistoryPanel';
+import { ComparePanel } from './components/dashboard/ComparePanel';
 import { PanelLeft, X, Eye, FileSpreadsheet, FileText, HardDriveDownload, Trash2 } from 'lucide-react';
 
 export default function App() {
@@ -1106,6 +1108,44 @@ export default function App() {
     setIsRunning(false);
     addLog('info', 'Simulation stopped. Report view generates from the state at the moment you open it.');
     setIsRealtimeReportOpen(true);
+
+    // Archive this run into the History (persistent, survives reloads)
+    const ctx = reportCtxRef.current;
+    const t = ctx.telemetry;
+    fetch('/api/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: `${ctx.chemistrySpec.name} · ${ctx.seriesCount}S${ctx.parallelCount}P · ${new Date().toLocaleString()}`,
+        chemistry: ctx.chemistrySpec.id,
+        seriesCount: ctx.seriesCount,
+        parallelCount: ctx.parallelCount,
+        simulationMode: ctx.simulationMode,
+        loadProfile: ctx.loadProfile,
+        elapsedMs: ctx.elapsedMs,
+        tickCount: ctx.tickCount,
+        packVoltage: Number(t.packVoltage.toFixed(3)),
+        packCurrent: Number(t.packCurrent.toFixed(3)),
+        packPower: Number(t.packPower.toFixed(2)),
+        packSoC: Number(t.packSoC.toFixed(2)),
+        packSoH: Number(t.packSoH.toFixed(2)),
+        reportData: {
+          telemetry: t,
+          energy: ctx.energy,
+          electrical: ctx.electrical,
+          snapshots: ctx.snapshots.slice(-120),
+          alarmHistory: (ctx.alarmHistory ?? []).slice(-50),
+          logs: ctx.logs.slice(-50),
+          config: ctx.config,
+        },
+      }),
+    })
+      .then((res) => {
+        if (res.ok) addLog('info', 'Simulation report archived to History.');
+      })
+      .catch(() => {
+        /* history save is best-effort; offline runs still show the live report */
+      });
   }, [addLog]);
 
 
@@ -1383,6 +1423,26 @@ export default function App() {
                 onRun={handleRun}
                 onStop={handleStop}
                 onOpenReports={handleViewReport}
+              />
+            )}
+
+            {dashTab === 'compare' && (
+              <ComparePanel
+                seriesCount={seriesCount}
+                parallelCount={parallelCount}
+              />
+            )}
+
+            {dashTab === 'history' && (
+              <HistoryPanel
+                spec={chemistrySpec}
+                onViewReport={(report: HistoryReport) => {
+                  const data = report.reportData as { telemetry?: { packVoltage: number; packCurrent: number; packPower: number; packSoC: number } };
+                  addLog(
+                    'info',
+                    `History report #${report.id} opened · ${report.chemistry.toUpperCase()} ${report.seriesCount}S${report.parallelCount}P · ${data?.telemetry?.packVoltage?.toFixed(1) ?? '—'}V / ${data?.telemetry?.packCurrent?.toFixed(1) ?? '—'}A`
+                  );
+                }}
               />
             )}
           </main>

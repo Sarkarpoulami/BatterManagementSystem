@@ -30,9 +30,11 @@ import {
   ChevronRight,
   Eye,
   Home,
+  GitCompare,
+  History,
 } from 'lucide-react';
 
-export type DashTab = 'overview' | 'stack' | 'waveforms' | 'cell' | 'operate';
+export type DashTab = 'overview' | 'stack' | 'waveforms' | 'cell' | 'operate' | 'compare' | 'history';
 
 interface DashboardSidebarProps {
   dashTab: DashTab;
@@ -143,6 +145,8 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
     { id: 'waveforms', label: 'Trends / scope', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: 'cell', label: 'Cell channel', icon: <BatteryMedium className="w-3.5 h-3.5" /> },
     { id: 'operate', label: 'Control', icon: <Sliders className="w-3.5 h-3.5" /> },
+    { id: 'compare', label: 'Compare', icon: <GitCompare className="w-3.5 h-3.5" /> },
+    { id: 'history', label: 'History', icon: <History className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -221,7 +225,7 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
             ))}
           </select>
         </Row>
-        <div className="grid grid-cols-5 gap-1">
+        <div className="grid grid-cols-7 gap-1">
           {views.map((v) => (
             <button
               key={v.id}

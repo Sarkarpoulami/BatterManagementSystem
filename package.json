@@ -1,16 +1,25 @@
 {
-  "name": "react-vite-tailwind",
+  "name": "batter-management-system",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "description": "e-BMS — an offline electrical battery management system simulator: cell-string telemetry, single-line diagram, protection alarms, live reports and an archived History of every simulation run.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sarkarpoulami/BatterManagementSystem.git"
+  },
+  "homepage": "https://github.com/Sarkarpoulami/BatterManagementSystem#readme",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
   },
   "dependencies": {
-    "@types/file-saver": "^2.0.7",
-    "@types/three": "^0.186.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "2.1.1",
     "file-saver": "^2.0.5",
@@ -25,9 +34,11 @@
   "devDependencies": {
     "@tailwindcss/vite": "4.1.17",
     "@types/canvas-confetti": "^1.9.0",
+    "@types/file-saver": "^2.0.7",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "5.1.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",

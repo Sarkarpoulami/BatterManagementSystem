@@ -16,4 +16,14 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    // Listen on every interface so the dev server is reachable from containers / previews.
+    host: "0.0.0.0",
+    // Dev server only: also accept requests proxied through a preview tunnel.
+    // Extra hosts can be allowed with VITE_ALLOWED_HOSTS="a.dev,b.dev".
+    allowedHosts: [
+      ".e2b.app",
+      ...(process.env.VITE_ALLOWED_HOSTS ? process.env.VITE_ALLOWED_HOSTS.split(",") : []),
+    ],
+  },
 });

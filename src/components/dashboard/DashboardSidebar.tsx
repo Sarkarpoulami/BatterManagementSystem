@@ -30,9 +30,10 @@ import {
   ChevronRight,
   Eye,
   Home,
+  History as HistoryIcon,
 } from 'lucide-react';
 
-export type DashTab = 'overview' | 'stack' | 'waveforms' | 'cell' | 'operate';
+export type DashTab = 'overview' | 'stack' | 'waveforms' | 'cell' | 'operate' | 'history';
 
 interface DashboardSidebarProps {
   dashTab: DashTab;
@@ -68,6 +69,10 @@ interface DashboardSidebarProps {
   onRandomizeImbalance: () => void;
   onResetPack: () => void;
   onOpenReports: () => void;
+  /** Opens the History view — the record of reports captured while the simulation runs. */
+  onOpenHistory: () => void;
+  /** Number of reports currently archived (badge on the History tab). */
+  reportCount: number;
   onOpenWizard: () => void;
 }
 
@@ -130,6 +135,8 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
     onRandomizeImbalance,
     onResetPack,
     onOpenReports,
+    onOpenHistory,
+    reportCount,
     onOpenWizard,
   } = props;
 
@@ -143,6 +150,7 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
     { id: 'waveforms', label: 'Trends / scope', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: 'cell', label: 'Cell channel', icon: <BatteryMedium className="w-3.5 h-3.5" /> },
     { id: 'operate', label: 'Control', icon: <Sliders className="w-3.5 h-3.5" /> },
+    { id: 'history', label: `Report history (${reportCount})`, icon: <HistoryIcon className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -221,19 +229,28 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
             ))}
           </select>
         </Row>
-        <div className="grid grid-cols-5 gap-1">
+        <div className="grid grid-cols-6 gap-1">
           {views.map((v) => (
             <button
               key={v.id}
               title={v.label}
               onClick={() => onChangeTab(v.id)}
-              className={`h-8 rounded-md flex items-center justify-center cursor-pointer border ${
+              className={`relative h-8 rounded-md flex items-center justify-center cursor-pointer border ${
                 dashTab === v.id
                   ? 'bg-cyan-500 text-slate-950 border-cyan-300'
                   : 'bg-[#0b1220] text-slate-400 border-slate-700 hover:text-white'
               }`}
             >
               {v.icon}
+              {v.id === 'history' && reportCount > 0 && (
+                <span
+                  className={`absolute -top-1 -right-1 min-w-[14px] h-[14px] px-0.5 rounded-full text-[8.5px] font-bold leading-[14px] font-mono ${
+                    dashTab === v.id ? 'bg-slate-950 text-cyan-300' : 'bg-purple-500 text-white'
+                  }`}
+                >
+                  {reportCount > 99 ? '99+' : reportCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -566,6 +583,14 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
           </button>
           <button onClick={onViewReport} className="h-8 rounded-md text-[11px] font-medium bg-[#0b1220] border border-slate-700 text-slate-200 flex items-center justify-center gap-1 cursor-pointer">
             <Eye className="w-3 h-3 text-cyan-400" /> Last report
+          </button>
+          <button
+            onClick={onOpenHistory}
+            title="History — every report captured while the simulation ran"
+            className="h-8 rounded-md text-[11px] font-medium bg-[#0b1220] border border-slate-700 text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+          >
+            <HistoryIcon className="w-3 h-3 text-purple-400" /> History
+            {reportCount > 0 && <span className="px-1 rounded bg-purple-500/25 text-purple-200 font-mono text-[10px]">{reportCount}</span>}
           </button>
         </div>
       </Group>

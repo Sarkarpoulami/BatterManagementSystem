@@ -71,7 +71,7 @@ const CELL_HEADERS = [
   'fault_type',
 ];
 
-export function downloadPackCsv(ctx: ReportContext): string {
+export function downloadPackCsv(ctx: ReportContext, tag?: string): string {
   const t = ctx.telemetry;
   const spec = ctx.chemistrySpec;
   const life = estimateBatteryLife(t, ctx.cells, spec);
@@ -80,6 +80,7 @@ export function downloadPackCsv(ctx: ReportContext): string {
   const lines: string[][] = [
     ['BMS Pack Report'],
     ['Generated (UTC)', new Date().toISOString()],
+    ...(tag ? [['History archive tag', tag]] : []),
     ['Topology', topo(ctx)],
     ['Cell type', spec.name],
     ['Simulation state', ctx.isRunning ? 'RUNNING' : 'STOPPED'],
@@ -130,7 +131,7 @@ export function downloadPackCsv(ctx: ReportContext): string {
     ...ctx.cells.map((c) => cellRow(ctx, c, meanV)),
   ];
 
-  const filename = `BMS_PackReport_${slug(ctx)}_${topo(ctx)}_${stamp()}.csv`;
+  const filename = `BMS_PackReport_${slug(ctx)}_${topo(ctx)}_${tag ?? stamp()}.csv`;
   deliverText(toCsv(lines), filename, 'text/csv');
   return filename;
 }

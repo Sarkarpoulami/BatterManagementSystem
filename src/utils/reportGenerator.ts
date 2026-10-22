@@ -494,13 +494,22 @@ function finalizePages(doc: jsPDF, title: string, subtitle: string) {
   }
 }
 
-export function downloadPackPdf(ctx: ReportContext): string {
+export interface PackPdfOptions {
+  /** File-name tag. Defaults to the current timestamp. */
+  tag?: string;
+  /** Replaces the "Generated …" stamp — archived copies show their capture time. */
+  generatedLabel?: string;
+  /** Extra banner printed under the header, marking the report as an archived copy. */
+  archiveNote?: string;
+}
+
+export function downloadPackPdf(ctx: ReportContext, opts: PackPdfOptions = {}): string {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const w = doc.internal.pageSize.getWidth();
   const spec = ctx.chemistrySpec;
   const t = ctx.telemetry;
   const life = estimateBatteryLife(ctx.telemetry, ctx.cells, spec);
-  const title = `Pack Report — ${spec.shortName} ${topology(ctx)}`;
+  const title = `${opts.archiveNote ? 'Archived Pack Report' : 'Pack Report'} — ${spec.shortName} ${topology(ctx)}`;
 
   let y = 26;
   doc.setFont('helvetica', 'bold');
@@ -511,8 +520,17 @@ export function downloadPackPdf(ctx: ReportContext): string {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...SLATE);
-  doc.text(`${spec.name} ${spec.nominalVoltage.toFixed(2)} V cell string  ·  ${topology(ctx)}  ·  ${(spec.nominalVoltage * ctx.seriesCount).toFixed(1)} V nominal  ·  Generated ${new Date().toLocaleString()}`, 14, y);
-  y += 8;
+  doc.text(`${spec.name} ${spec.nominalVoltage.toFixed(2)} V cell string  ·  ${topology(ctx)}  ·  ${(spec.nominalVoltage * ctx.seriesCount).toFixed(1)} V nominal  ·  Generated ${opts.generatedLabel ?? new Date().toLocaleString()}`, 14, y);
+  if (opts.archiveNote) {
+    y += 4;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...AMBER);
+    doc.text(`HISTORY ARCHIVE — ${opts.archiveNote}`, 14, y);
+    y += 4;
+  } else {
+    y += 8;
+  }
 
   const kpiW = (w - 28 - 9) / 4;
   drawKpi(doc, 14, y, kpiW, 'PACK VOLTAGE', `${t.packVoltage.toFixed(2)} V`, `mean ${t.avgVoltage.toFixed(3)} V/cell`, GREEN);
@@ -803,7 +821,7 @@ export function downloadPackPdf(ctx: ReportContext): string {
   }
 
   finalizePages(doc, title, topology(ctx));
-  const filename = `BMS_PackReport_${slugChem(spec)}_${topology(ctx)}_${stamp()}.pdf`;
+  const filename = `BMS_PackReport_${slugChem(spec)}_${topology(ctx)}_${opts.tag ?? stamp()}.pdf`;
   savePdf(doc, filename);
   return filename;
 }

@@ -21,16 +21,31 @@ import { BmsLogsModal, BmsLogEvent } from './components/BmsLogsModal';
 import { ElectricalOverview } from './components/dashboard/ElectricalOverview';
 import { computeElectrical, accumulateEnergy, EMPTY_ENERGY, type EnergyCounters } from './utils/electrical';
 import { PackWaveforms } from './components/PackWaveforms';
-import { downloadCellPdf, createStoredReport, downloadStoredReportPdf, type ReportContext } from './utils/reportGenerator';
+import { downloadCellPdf, createStoredReport, downloadStoredReportPdf, formatClock, type ReportContext } from './utils/reportGenerator';
 import { downloadPackCsv, downloadCellCsv } from './utils/csvExport';
 import { evaluateAlarms, buildScheduledWarning, makeAlarmRecord, currentLimitA, type Alarm, type AlarmRecord, type AlarmSolution } from './utils/alarmSystem';
 import { AlarmOverlay } from './components/AlarmOverlay';
 import { RealtimeReportModal } from './components/RealtimeReportModal';
 import { BatterySetupWizard } from './components/BatterySetupWizard';
 import { loadState, saveState, clearState } from './utils/persistence';
+import {
+  AUTO_CAPTURE_INTERVAL_MS,
+  appendHistoryEntry,
+  captureHistoryEntry,
+  clearHistory,
+  loadHistory,
+  loadHistoryPrefs,
+  persistHistory,
+  removeHistoryEntry,
+  saveHistoryPrefs,
+  triggerMeta,
+  type HistoryTrigger,
+  type ReportHistoryStore,
+} from './utils/reportHistory';
 import { KpiStrip } from './components/dashboard/KpiStrip';
 import { DashboardSidebar, type DashTab } from './components/dashboard/DashboardSidebar';
-import { PanelLeft, X, Eye, FileSpreadsheet, FileText, HardDriveDownload, Trash2 } from 'lucide-react';
+import { ReportHistoryPanel } from './components/dashboard/ReportHistoryPanel';
+import { PanelLeft, X, Eye, FileSpreadsheet, FileText, HardDriveDownload, Trash2, History as HistoryIcon, Archive } from 'lucide-react';
 
 export default function App() {
   // Chemistry State
@@ -421,6 +436,120 @@ export default function App() {
   const isRunningRef = useRef(isRunning);
   isRunningRef.current = isRunning;
 
+  // ── History: the record of reports captured while the simulation runs ─────
+  // Every run archives reports here — at RUN, at STOP, on a timer while running,
+  // on a critical alarm, and whenever the operator asks for it. The archive is
+  // kept in localStorage, so it survives reloads and needs no internet.
+  const [history, setHistory] = useState<ReportHistoryStore>(() => loadHistory());
+  const reportHistoryRef = useRef<ReportHistoryStore>(history);
+  reportHistoryRef.current = history;
+  const [autoCapture, setAutoCapture] = useState<boolean>(() => loadHistoryPrefs().autoCapture);
+  /** Run counter keeps climbing across reloads, so entries stay attributable to a run. */
+  const runIndexRef = useRef<number>(history.runCount);
+  const runStartedAtRef = useRef<number | null>(null);
+  const wasRunningRef = useRef<boolean>(isRunning);
+  const lastCaptureAtRef = useRef<Record<string, number>>({});
+
+  /** Persists the archive (quota-safe) and mirrors the stored copy back into state. */
+  const applyHistory = useCallback((next: ReportHistoryStore) => {
+    const result = persistHistory(next);
+    reportHistoryRef.current = result.ok && result.dropped > 0 ? loadHistory() : next;
+    setHistory(result.ok ? { ...reportHistoryRef.current, savedAt: result.savedAt } : reportHistoryRef.current);
+    return result;
+  }, []);
+
+  /**
+   * Archives the pack state at this exact instant. Reads the live report context
+   * through its ref, so it can be called from timers as well as click handlers.
+   */
+  const recordReport = useCallback(
+    (trigger: HistoryTrigger, note?: string) => {
+      const ctx = reportCtxRef.current;
+      if (!ctx || ctx.cells.length === 0) return null;
+      const entry = captureHistoryEntry(ctx, {
+        trigger,
+        note,
+        runIndex: runIndexRef.current,
+        runStartedAt: runStartedAtRef.current,
+      });
+      lastCaptureAtRef.current[trigger] = Date.now();
+      const result = applyHistory(appendHistoryEntry(reportHistoryRef.current, entry));
+      if (result.ok) {
+        addLog(
+          'info',
+          `REPORT ARCHIVED — ${triggerMeta(trigger).label} · run #${entry.runIndex} · ${entry.label} · ${formatClock(entry.sessionElapsedMs)} · ${entry.summary.packVoltage.toFixed(2)} V · SoC ${entry.summary.packSoC.toFixed(1)}% · Δ ${entry.summary.deltaMv.toFixed(0)} mV`
+        );
+      } else {
+        addLog('warning', 'REPORT NOT ARCHIVED — browser storage refused the write (history full or blocked).');
+      }
+      return entry;
+    },
+    [applyHistory, addLog]
+  );
+
+  // RUN → STOP transitions: a report is archived when a run starts and again when it ends,
+  // whichever control engaged the simulation (Run button, mode switch, auto-balance).
+  useEffect(() => {
+    const was = wasRunningRef.current;
+    wasRunningRef.current = isRunning;
+    if (isRunning === was) return;
+    if (isRunning) {
+      runIndexRef.current += 1;
+      runStartedAtRef.current = Date.now();
+      recordReport(
+        'run-start',
+        `Run #${runIndexRef.current} started — ${modeRef.current.replace(/_/g, ' ')} · ${profileRef.current.replace(/_/g, ' ')}`
+      );
+    } else {
+      const startedAt = runStartedAtRef.current;
+      recordReport('run-stop', `Run #${runIndexRef.current} stopped after ${formatClock(startedAt ? Date.now() - startedAt : 0)}`);
+      runStartedAtRef.current = null;
+    }
+  }, [isRunning, recordReport]);
+
+  // Periodic checkpoint while the simulation runs (switchable from the History view).
+  useEffect(() => {
+    if (!isRunning || !autoCapture) return;
+    const id = setInterval(() => {
+      recordReport('checkpoint', `Auto checkpoint every ${AUTO_CAPTURE_INTERVAL_MS / 1000} s · run #${runIndexRef.current}`);
+    }, AUTO_CAPTURE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [isRunning, autoCapture, recordReport]);
+
+  const handleCaptureNow = useCallback(() => {
+    const entry = recordReport('manual', 'Saved by the operator');
+    playCellClickSound(880);
+    return entry;
+  }, [recordReport]);
+
+  const handleDeleteHistoryEntry = useCallback(
+    (id: string) => {
+      applyHistory(removeHistoryEntry(reportHistoryRef.current, id));
+    },
+    [applyHistory]
+  );
+
+  const handleClearHistory = useCallback(() => {
+    const empty = clearHistory();
+    reportHistoryRef.current = empty;
+    setHistory(empty);
+    addLog('info', 'Report history cleared — the archive is empty.');
+  }, [addLog]);
+
+  const handleToggleAutoCapture = useCallback(
+    (next: boolean) => {
+      setAutoCapture(next);
+      saveHistoryPrefs({ autoCapture: next });
+      addLog(
+        'info',
+        next
+          ? `Auto-record ON — a report is archived every ${AUTO_CAPTURE_INTERVAL_MS / 1000} s while the simulation runs.`
+          : 'Auto-record OFF — only run start / stop and manual captures are archived.'
+      );
+    },
+    [addLog]
+  );
+
   // Simulation Tick Interval — only while RUN is engaged
   useEffect(() => {
     if (!isRunning) return;
@@ -547,6 +676,11 @@ export default function App() {
       for (const a of raised) {
         hist = [makeAlarmRecord(a), ...hist];
         addLog(a.severity === 'critical' ? 'fault' : 'warning', `ALARM RAISED — ${a.title} · ${a.measured} vs limit ${a.limit}${a.cellId ? ` · cell #${a.cellId}` : ''}`);
+        // A trip-level fault archives the pack state as well, so the History keeps the
+        // report of what the pack looked like at the moment the protection operated.
+        if (a.severity === 'critical' && now - (lastCaptureAtRef.current.fault ?? 0) >= 15_000) {
+          recordReport('fault', `Critical alarm — ${a.title}${a.cellId ? ` · cell #${a.cellId}` : ''}`);
+        }
       }
       for (const a of cleared) {
         hist = hist.map((r) => (r.key === a.key && r.outcome === 'pending' ? { ...r, resolvedAt: now, outcome: 'auto-cleared' as const } : r));
@@ -588,7 +722,7 @@ export default function App() {
       setActiveAlarms(cw && !threats.some((a) => a.key === cw.key) ? [cw, ...threats] : threats);
     }, 500);
     return () => clearInterval(id);
-  }, [isRunning, chemistrySpec, addLog]);
+  }, [isRunning, chemistrySpec, addLog, recordReport]);
 
   // ── Offline autosave: keeps previous data so reloads restore it (no internet needed) ──
   useEffect(() => {
@@ -1104,7 +1238,7 @@ export default function App() {
 
   const handleStop = useCallback(() => {
     setIsRunning(false);
-    addLog('info', 'Simulation stopped. Report view generates from the state at the moment you open it.');
+    addLog('info', 'Simulation stopped — the run report is archived to History. The report view generates from the state at the moment you open it.');
     setIsRealtimeReportOpen(true);
   }, [addLog]);
 
@@ -1174,6 +1308,11 @@ export default function App() {
       onRandomizeImbalance={handleRandomizeImbalance}
       onResetPack={handleResetPack}
       onOpenReports={handleViewReport}
+      onOpenHistory={() => {
+        setDashTab('history');
+        setMobileOptionsOpen(false);
+      }}
+      reportCount={history.entries.length}
       onOpenWizard={() => setIsWizardOpen(true)}
     />
   );
@@ -1236,8 +1375,28 @@ export default function App() {
           >
             <FileText className="w-3.5 h-3.5" /> PDF
           </button>
+          <button
+            onClick={() => setDashTab('history')}
+            title="History — record of every report captured while the simulation runs"
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-bold cursor-pointer border ${
+              dashTab === 'history'
+                ? 'bg-purple-500 text-slate-950 border-purple-300'
+                : 'bg-purple-900/60 text-purple-100 border-purple-700 hover:bg-purple-800'
+            }`}
+          >
+            <HistoryIcon className="w-3.5 h-3.5" /> History
+            <span className="px-1 rounded bg-black/25 text-[10px] font-mono">{history.entries.length}</span>
+          </button>
+          <button
+            onClick={handleCaptureNow}
+            title="Archive the pack state right now"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-slate-200 font-bold cursor-pointer hover:bg-slate-700"
+          >
+            <Archive className="w-3.5 h-3.5" /> Archive now
+          </button>
           <span className="ml-auto text-slate-500">
-            Generated live from the pack state at the moment you click
+            Live exports read the pack at the moment you click · History keeps {history.entries.length} archived report{history.entries.length === 1 ? '' : 's'}
+            {history.entries[0] ? ` · last ${new Date(history.entries[0].capturedAt).toLocaleTimeString()}` : ''}
           </span>
         </div>
       </div>
@@ -1366,6 +1525,19 @@ export default function App() {
               />
             )}
 
+            {dashTab === 'history' && (
+              <ReportHistoryPanel
+                history={history}
+                autoCapture={autoCapture}
+                isRunning={isRunning}
+                onToggleAutoCapture={handleToggleAutoCapture}
+                onCaptureNow={handleCaptureNow}
+                onDeleteEntry={handleDeleteHistoryEntry}
+                onClearHistory={handleClearHistory}
+                onOpenLiveReport={handleViewReport}
+              />
+            )}
+
             {dashTab === 'operate' && (
               <PackControls
                 simulationMode={simulationMode}
@@ -1419,6 +1591,12 @@ export default function App() {
         onClose={() => setIsRealtimeReportOpen(false)}
         isRunning={isRunning}
         generate={generateReport}
+        onSaveToHistory={handleCaptureNow}
+        onOpenHistory={() => {
+          setIsRealtimeReportOpen(false);
+          setDashTab('history');
+        }}
+        historyCount={history.entries.length}
       />
 
       <BatterySetupWizard

@@ -10,6 +10,8 @@ import {
   Gauge,
   AlertTriangle,
   Lock,
+  Archive,
+  History as HistoryIcon,
 } from 'lucide-react';
 import type { StoredReport } from '../utils/reportGenerator';
 import {
@@ -29,6 +31,12 @@ interface RealtimeReportModalProps {
   isRunning: boolean;
   /** Builds a report from the live pack state at the instant it is called. */
   generate: () => StoredReport;
+  /** Archives the report shown here into History. */
+  onSaveToHistory?: () => void;
+  /** Switches to the History view. */
+  onOpenHistory?: () => void;
+  /** How many reports History currently holds (badge). */
+  historyCount?: number;
 }
 
 function Kpi({ label, value, unit, sub, accent, icon }: {
@@ -82,7 +90,15 @@ function ExportTile({
   );
 }
 
-export function RealtimeReportModal({ isOpen, onClose, isRunning, generate }: RealtimeReportModalProps) {
+export function RealtimeReportModal({
+  isOpen,
+  onClose,
+  isRunning,
+  generate,
+  onSaveToHistory,
+  onOpenHistory,
+  historyCount = 0,
+}: RealtimeReportModalProps) {
   const [cellId, setCellId] = useState<number>(1);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<StoredReport | null>(null);
@@ -169,8 +185,31 @@ export function RealtimeReportModal({ isOpen, onClose, isRunning, generate }: Re
                 >
                   <RefreshCw className="w-3.5 h-3.5" /> Regenerate now
                 </button>
+                {onSaveToHistory && (
+                  <button
+                    onClick={() => {
+                      setReport(generate());
+                      onSaveToHistory();
+                    }}
+                    title="Archive this report into History so it can be re-exported later"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-purple-700 text-white border border-purple-500 hover:bg-purple-600 cursor-pointer"
+                  >
+                    <Archive className="w-3.5 h-3.5" /> Save to History
+                  </button>
+                )}
+                {onOpenHistory && (
+                  <button
+                    onClick={onOpenHistory}
+                    title="Open the History view"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 text-purple-200 border border-purple-800 hover:bg-purple-950/60 cursor-pointer"
+                  >
+                    <HistoryIcon className="w-3.5 h-3.5" /> History
+                    <span className="px-1 rounded bg-purple-500/25 text-purple-100 font-mono text-[10px]">{historyCount}</span>
+                  </button>
+                )}
                 <span className="text-[11px] text-slate-500">
                   Nothing here is pre-recorded — the figures are read from the pack the moment you open, refresh or download.
+                  Use <span className="text-purple-300 font-bold">Save to History</span> to keep a copy in the archive.
                 </span>
               </div>
 

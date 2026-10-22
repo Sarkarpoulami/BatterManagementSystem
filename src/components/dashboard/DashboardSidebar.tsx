@@ -31,9 +31,10 @@ import {
   Eye,
   Home,
   History as HistoryIcon,
+  Scale,
 } from 'lucide-react';
 
-export type DashTab = 'overview' | 'stack' | 'waveforms' | 'cell' | 'operate' | 'history';
+export type DashTab = 'overview' | 'stack' | 'waveforms' | 'cell' | 'operate' | 'history' | 'compare';
 
 interface DashboardSidebarProps {
   dashTab: DashTab;
@@ -150,6 +151,7 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
     { id: 'waveforms', label: 'Trends / scope', icon: <Activity className="w-3.5 h-3.5" /> },
     { id: 'cell', label: 'Cell channel', icon: <BatteryMedium className="w-3.5 h-3.5" /> },
     { id: 'operate', label: 'Control', icon: <Sliders className="w-3.5 h-3.5" /> },
+    { id: 'compare', label: 'Compare two cells', icon: <Scale className="w-3.5 h-3.5" /> },
     { id: 'history', label: `Report history (${reportCount})`, icon: <HistoryIcon className="w-3.5 h-3.5" /> },
   ];
 
@@ -229,7 +231,7 @@ export function DashboardSidebar(props: DashboardSidebarProps) {
             ))}
           </select>
         </Row>
-        <div className="grid grid-cols-6 gap-1">
+        <div className="grid grid-cols-7 gap-1">
           {views.map((v) => (
             <button
               key={v.id}

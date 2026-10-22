@@ -45,6 +45,8 @@ import {
 import { KpiStrip } from './components/dashboard/KpiStrip';
 import { DashboardSidebar, type DashTab } from './components/dashboard/DashboardSidebar';
 import { ReportHistoryPanel } from './components/dashboard/ReportHistoryPanel';
+import { CompareCellsPanel } from './components/dashboard/CompareCellsPanel';
+import type { CompareInput } from './utils/chemistryCompare';
 import { PanelLeft, X, Eye, FileSpreadsheet, FileText, HardDriveDownload, Trash2, History as HistoryIcon, Archive } from 'lucide-react';
 
 export default function App() {
@@ -258,6 +260,27 @@ export default function App() {
     resetSessionClock();
     addLog('info', `Updated pack parallel branches to ${newParallel}P`);
   }, [seriesCount, chemistry, addLog, resetSessionClock]);
+
+  // Handler: apply a build chosen in the Compare view (chemistry + topology in one step)
+  const handleApplyComparison = useCallback(
+    (input: CompareInput) => {
+      const spec = BATTERY_CHEMISTRIES[input.chemistry];
+      const nextSeries = Math.min(32, Math.max(1, Math.round(input.seriesCount)));
+      const nextParallel = Math.min(12, Math.max(1, Math.round(input.parallelCount)));
+      setChemistry(input.chemistry);
+      setSeriesCount(nextSeries);
+      setParallelCount(nextParallel);
+      setConfig((prev) => ({ ...prev, seriesCount: nextSeries, parallelCount: nextParallel }));
+      setCells(initializeCellStack(nextSeries, nextParallel, input.chemistry, 80, true));
+      setSelectedCellId(1);
+      resetSessionClock();
+      addLog(
+        'info',
+        `Compare: applied ${spec.name} at ${nextSeries}S${nextParallel}P — ${(spec.nominalVoltage * nextSeries).toFixed(1)} V nominal, ${nextSeries * nextParallel} cells.`
+      );
+    },
+    [addLog, resetSessionClock]
+  );
 
   // Handler: Update Partial Config
   const handleUpdateConfig = useCallback((partial: Partial<PackConfig>) => {
@@ -1522,6 +1545,17 @@ export default function App() {
                 onHealCell={handleHealCell}
                 onDownloadCellCsv={(id) => downloadCellCsv(reportCtxRef.current, id)}
                 onDownloadCellPdf={(id) => downloadCellPdf(reportCtx, id)}
+              />
+            )}
+
+            {dashTab === 'compare' && (
+              <CompareCellsPanel
+                liveChemistry={chemistry}
+                liveSeriesCount={seriesCount}
+                liveParallelCount={parallelCount}
+                liveLoadCurrent={config.loadCurrent}
+                onApplyToPack={handleApplyComparison}
+                onOpenOverview={() => setDashTab('overview')}
               />
             )}
 

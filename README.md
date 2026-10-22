@@ -32,9 +32,11 @@ npm run dev     # http://localhost:5173
 1. Pick a cell chemistry and topology in the setup wizard (or **Home** in the sidebar).
 2. Choose a mode / load profile and press **Run**. The tick loop advances every 150 ms.
 3. Read the pack from the tabs: electrical overview (single-line diagram), cell string
-   (2D/3D/thermal/delta), trends & scope, cell channel, control.
+   (2D/3D/thermal/delta), trends & scope, cell channel, control, compare, history.
 4. Reports: **View** opens the live report, **CSV** / **PDF** export the pack at the click
    instant, **History** opens the archive (see below).
+5. Deciding between two cells? **Compare** evaluates any two chemistries and topologies
+   side by side (see below) and can push the winner into the live pack.
 
 ### History — the record of reports
 
@@ -58,6 +60,40 @@ live exports.
 
 The archive is capped (50 entries / 3 MB) and drops the oldest reports when it grows past
 the browser's storage quota, so it can never break the app.
+
+### Compare — two cells, side by side
+
+The **Compare** tab (scales icon in the Display column) puts two cell chemistries — Li-Ion,
+LiPo, solid-state, lead-acid, LiFePO4 and NiMH — through one weighted evaluation.
+
+* **Two sides, two topologies.** Each side has its own chemistry picker plus series (1–32)
+  and parallel (1–12) steppers. The chain button links the two topologies so a change on one
+  side moves the other too; unlink it to compare, for example, 13S1P Li-Ion against 15S1P
+  LiFePO4 on a common 48 V bus. The side cards recompute as you type: pack voltage, capacity,
+  stored energy, cell mass, pack resistance, maximum discharge current, peak power, voltage
+  sag, runtime, cycle life and service years.
+* **Working load.** One amp value (seeded from the Control panel's load current) drives the
+  runtime, C-rate and sag figures on both sides.
+* **Generate comparison.** Writes a verdict, a seven-metric weighted scorecard (energy
+  density 20 %, cycle life 20 %, safety margin 20 %, power 15 %, temperature range 10 %,
+  cost 10 %, internal resistance 5 %), six descriptive analysis sections (voltage / energy /
+  mass, power / resistance / efficiency, lifetime and economics, thermal behaviour and
+  safety, construction and electrochemistry, fit for purpose), ten use-case picks, 49 spec
+  parameters in seven collapsible tables, per-chemistry profiles with strengths and
+  watch-outs, and numbered recommendations. Editing an input flags the screen *stale* until
+  you regenerate, so a displayed result always says which inputs produced it.
+* **Apply to live pack.** Either side can be pushed into the simulator — chemistry and
+  topology in one step — then run, watched and archived to History like any other pack.
+* **Export.** `CSV` and `PDF` write the whole comparison (scorecard, every parameter group,
+  all analysis text, use cases, recommendations and profile fit) as
+  `BMS_Compare_NiMH_21S3P_vs_Li-Ion_21S3P_20261022_162347.pdf`. An export regenerates from
+  the inputs on screen first, so the file can never describe a stale comparison.
+
+Every number is derived from the same chemistry library the simulator runs on
+(`src/data/batteryChemistryData.ts`) by `src/utils/chemistryCompare.ts` — nothing is
+hard-coded per pair, and comparing a chemistry with itself turns the report into a topology
+study. The workspace (both sides, link state and working load) is kept in `localStorage`
+under `bms.compare.inputs.v1`, so it survives tab switches and reloads.
 
 ## Deployment
 
@@ -120,10 +156,11 @@ src/
   index.css                 Tailwind entry + alarm/SLD keyframes
   types/battery.ts          cell, chemistry, telemetry, session models
   data/                     chemistry library and load profiles
-  utils/                    simulation, electrical, alarms, reports, CSV, History, storage
+  utils/                    simulation, electrical, alarms, reports, CSV, History, storage,
+                            chemistry comparison engine + its CSV/PDF export
   components/               header, sidebar, stack views, inspector, modals
     charts/                 canvas line + delta charts
-    dashboard/              overview, KPI strip, History panel
+    dashboard/              overview, KPI strip, History panel, Compare panel
     electrical/             single-line diagram
 ```
 
